@@ -1,10 +1,15 @@
 struct FullVehicleState 
-    time::Float64
     position::SVector{3, Float64}
     velocity::SVector{3, Float64}
     ang_vel::SVector{3, Float64}
     orientation::SVector{3, Float64}
 end
+
+struct MyLocalizationType
+    last_update:: Float64
+    x::FullVehicleState
+end
+
 
 function localization(gps_channel, imu_channel, localization_state_channel)
     μ0 =[0,0, 2.645, zeros(10)]
@@ -50,6 +55,41 @@ function localization(gps_channel, imu_channel, localization_state_channel)
         end
 
     end
+end
+
+function test_algorithms(localization_state_channel)
+
+estimated_vehicle_states = Dict{Int, Tuple{Float64, Union{SimpleVehicleState, FullVehicleState}}}
+gt_vehicle_states = Dict{Int, GroundTruthMeasuremen}
+
+t = time()
+while true
+
+    while isready(gt_channel)
+        meas = take!(gt_channel)
+        id = meas.vehicle_id
+        if meas.time > gt_vehicle_states[id].time
+            gt_vehicle_states[id] = meas
+        end
+    end
+
+    latest_estimated_ego_state = fetch(localization_state_channel)
+    latest_true_ego_state = gt_vehicle_states[ego_vehicle_id]
+    if latest_estimated_ego_state.last_update < latest_true_ego_state.time - 0.5
+        @warn "Localization algorithm stale."
+    else
+        estimated_xyz = latest_estimated_ego_state.position
+        true_xyz = latest_true_ego_state.position
+        position_error = norm(estimated_xyz - true_xyz)
+        t2 = time()
+        if t2 - t > 5.0
+            @info "Localization position error: $position_error"
+            t = t2
+        end
+    end
+
+
+end
 end
 
 

@@ -6,11 +6,34 @@
 Unicycle model
 """
 function f(position, quaternion, velocity, angular_vel, Δt)
+    # r = angular_vel
+    # mag = norm(r)
+
+    # sᵣ = cos(mag*Δt / 2.0)
+    # vᵣ = sin(mag*Δt / 2.0) * r/mag
+
+    # sₙ = quaternion[1]
+    # vₙ = quaternion[2:4]
+
+    # s = sₙ*sᵣ - vₙ'*vᵣ
+    # v = sₙ*vᵣ+sᵣ*vₙ+vₙ×vᵣ
+
+    # new_position = position + Δt * velocity
+    # new_quaternion = [s; v]
+    # new_velocity = velocity
+    # new_angular_vel = angular_vel
+    # return [new_position; new_quaternion; new_velocity; new_angular_vel]
+
     r = angular_vel
     mag = norm(r)
 
-    sᵣ = cos(mag*Δt / 2.0)
-    vᵣ = sin(mag*Δt / 2.0) * r/mag
+    if mag < 1e-5
+        sᵣ = 1.0
+        vᵣ = zeros(3)
+    else
+        sᵣ = cos(mag*Δt / 2.0)
+        vᵣ = sin(mag*Δt / 2.0) * axis
+    end
 
     sₙ = quaternion[1]
     vₙ = quaternion[2:4]
@@ -238,16 +261,34 @@ function filter(meas; Δ,  μK , Σk, localization_state_channel)
         Σ = inv(inv(Σ̂) + C'*inv(meas_var)*C)
         μ = Σ * (inv(Σ̂) * μ̂ + C'*inv(meas_var) * (z - d))
 
-        put!(localization_state_channel, [μ, Σ])
+        full_state = FullVehicleState{position : μ[1:3], velocity: μ[8:10], ang_vel:[11:13], orientation:[4:7]}
+
+        local_state = MyLocalizationType{last_update: meas.time, x : full_state}
+        put!(localization_state_channel, local_state)
     else
         C = jac_h_imu(μ̂) # imu version
         d = h_imu(μ̂) - C*μ̂ # imu version
         Σ = inv(inv(Σ̂) + C'*inv(meas_var)*C)
         μ = Σ * (inv(Σ̂) * μ̂ + C'*inv(meas_var) * (z - d))
+        
+        full_state = FullVehicleState{position : μ[1:3], velocity: μ[8:10], ang_vel:[11:13], orientation:[4:7]}
 
-        put!(localization_state_channel, [μ, Σ])
+        local_state = MyLocalizationType{last_update: meas.time, x : full_state}
+
+        put!(localization_state_channel, local_state)
     end
 
 
 end
 
+struct FullVehicleState 
+    position::SVector{3, Float64}
+    velocity::SVector{3, Float64}
+    ang_vel::SVector{3, Float64}
+    orientation::SVector{3, Float64}
+end
+
+struct MyLocalizationType
+    last_update:: Float64
+    x::FullVehicleState
+end
