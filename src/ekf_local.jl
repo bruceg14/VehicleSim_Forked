@@ -2,15 +2,69 @@
 # u is [a angular velocity]
 # Δ time step
 
+function euler_to_quaternion(yaw, pitch, roll)
+
+    qx = sin(roll/2) * cos(pitch/2) * cos(yaw/2) - cos(roll/2) * sin(pitch/2) * sin(yaw/2)
+    qy = cos(roll/2) * sin(pitch/2) * cos(yaw/2) + sin(roll/2) * cos(pitch/2) * sin(yaw/2)
+    qz = cos(roll/2) * cos(pitch/2) * sin(yaw/2) - sin(roll/2) * sin(pitch/2) * cos(yaw/2)
+    qw = cos(roll/2) * cos(pitch/2) * cos(yaw/2) + sin(roll/2) * sin(pitch/2) * sin(yaw/2)
+
+    return [qx, qy, qz, qw]
+end
+
+
+function extract_yaw_from_quaternion(q)
+    atan(2(q[1]*q[4]+q[2]*q[3]), 1-2*(q[3]^2+q[4]^2))
+end
+
+# function J_Tbody(x)
+#     J_Tbody_xyz = (zeros(3,4), zeros(3,4), zeros(3,4))
+#     for i = 1:3
+#        J_Tbody_xyz[i][i,4] = 1.0
+#     end
+#     return (J_Tbody_xyz, [[dR zeros(3)] for dR in J_R_q(x[4:7])])
+# end  
+
+
 """
 Unicycle model
 """
 function f(position, quaternion, velocity, angular_vel, Δt)
+    r = angular_vel
+    mag = norm(r)
+
+    if mag < 1e-5
+        sᵣ = 1.0
+        vᵣ = zeros(3)
+    else
+        sᵣ = cos(mag*Δt / 2.0)
+        vᵣ = sin(mag*Δt / 2.0) * (r / mag)
+    end
+
+    sₙ = quaternion[1]
+    vₙ = quaternion[2:4]
+
+    s = sₙ*sᵣ - vₙ'*vᵣ
+    v = sₙ*vᵣ+sᵣ*vₙ+vₙ×vᵣ
+
+    R = Rot_from_quat(quaternion)  
+    new_position = position + Δt * R * velocity
+    new_quaternion = [s; v]
+    new_velocity = velocity
+    new_angular_vel = angular_vel
+    return [new_position; new_quaternion; new_velocity; new_angular_vel]
+
+
     # r = angular_vel
     # mag = norm(r)
 
-    # sᵣ = cos(mag*Δt / 2.0)
-    # vᵣ = sin(mag*Δt / 2.0) * r/mag
+    # if mag < 1e-5
+    #     sᵣ = 1.0
+    #     vᵣ = zeros(3)
+    # else
+    #     sᵣ = cos(mag*Δt / 2.0)
+    #     vᵣ = sin(mag*Δt / 2.0) * axis
+    # end
 
     # sₙ = quaternion[1]
     # vₙ = quaternion[2:4]
@@ -23,156 +77,145 @@ function f(position, quaternion, velocity, angular_vel, Δt)
     # new_velocity = velocity
     # new_angular_vel = angular_vel
     # return [new_position; new_quaternion; new_velocity; new_angular_vel]
-
-    r = angular_vel
-    mag = norm(r)
-
-    if mag < 1e-5
-        sᵣ = 1.0
-        vᵣ = zeros(3)
-    else
-        sᵣ = cos(mag*Δt / 2.0)
-        vᵣ = sin(mag*Δt / 2.0) * axis
-    end
-
-    sₙ = quaternion[1]
-    vₙ = quaternion[2:4]
-
-    s = sₙ*sᵣ - vₙ'*vᵣ
-    v = sₙ*vᵣ+sᵣ*vₙ+vₙ×vᵣ
-
-    new_position = position + Δt * velocity
-    new_quaternion = [s; v]
-    new_velocity = velocity
-    new_angular_vel = angular_vel
-    return [new_position; new_quaternion; new_velocity; new_angular_vel]
 end
 
+# function J_R_q(q)
+#     qw = q[1]
+#     qx = q[2]
+#     qy = q[3]
+#     qz = q[4]
+
+#     dRdq1 = 2*[qw -qz qy;
+#              qz qw -qx;
+#              -qy qx qw]
+#     dRdq2 = 2*[qx qy qz;
+#                qy -qx -qw;
+#                qz qw -qx]
+#     dRdq3 = 2*[-qy qx qw;
+#                qx qy qz;
+#                -qw qz -qy]
+#     dRdq4 = 2*[-qz -qw qx;
+#                qw -qz qy;
+#                qx qy qz]
+#     (dRdq1, dRdq2, dRdq3, dRdq4)
+# end
 
 """
 Jacobian of f_localization with respect to x, evaluated at x,Δ.
 """
 function jac_fx(x, Δt)
-    position = x[1:3]
-    quaternion = x[4:7]
-    velocity = x[8:10]
-    angular_vel = x[11:13]
-    r = angular_vel
+    J = zeros(13, 13)
+
+    r = x[11:13]
     mag = norm(r)
-
-    sᵣ = cos(mag*Δt / 2.0)
-    vᵣ = sin(mag*Δt / 2.0) * r/mag
-
-    sₙ = quaternion[1]
-    vₙ = quaternion[2:4]
+    if mag < 1e-5
+        sᵣ = 1.0
+        vᵣ = zeros(3)
+    else
+        sᵣ = cos(mag*Δt / 2.0)
+        vᵣ = sin(mag*Δt / 2.0) * (r / mag)
+    end
+    sₙ = x[4]
+    vₙ = x[5:7]
 
     s = sₙ*sᵣ - vₙ'*vᵣ
     v = sₙ*vᵣ+sᵣ*vₙ+vₙ×vᵣ
 
-    # Some results I'm not sure about.
-    # For Column 11
-    jf11a = (4*(r[1]*conj(r[1]))^(1/2)*mag^2)
-    jf11b = (2*(r[1]*conj(r[1]))^(1/2)*mag^2^(3/2))
-    jf11c = abs(r[1])*(r[1] + conj(r[1]))
+    R = Rot_from_quat([sₙ; vₙ])  
+    (J_R_q1, J_R_q2, J_R_q3, J_R_q4) = J_R_q([sₙ; vₙ])
+    velocity = x[8:10]
 
-    jf_4_11 = (vᵣ[1]*mag*abs(r[1])*conj(vₙ[1])*(r[1] + conj(r[1])))/(2*(r[1]*conj(r[1]))^(1/2)*mag^2^(3/2)) - (sₙ*Δt*sin((Δt*mag)/2)*abs(r[1])*(r[1] + conj(r[1])))/(4*(r[1]*conj(r[1]))^(1/2)*mag) - (sin((Δt*mag)/2)*conj(vₙ[1]))/mag + (vᵣ[2]*mag*abs(r[1])*conj(vₙ[2])*(r[1] + conj(r[1])))/(2*(r[1]*conj(r[1]))^(1/2)*mag^2^(3/2)) + (vᵣ[3]*mag*abs(r[1])*conj(vₙ[3])*(r[1] + conj(r[1])))/(2*(r[1]*conj(r[1]))^(1/2)*mag^2^(3/2)) - (r[1]*Δt*sᵣ*abs(r[1])*conj(vₙ[1])*(r[1] + conj(r[1])))/(4*(r[1]*conj(r[1]))^(1/2)*mag^2) - (r[2]*Δt*sᵣ*abs(r[1])*conj(vₙ[2])*(r[1] + conj(r[1])))/(4*(r[1]*conj(r[1]))^(1/2)*mag^2) - (r[3]*Δt*sᵣ*abs(r[1])*conj(vₙ[3])*(r[1] + conj(r[1])))/(4*(r[1]*conj(r[1]))^(1/2)*mag^2)
-    jf_5_11 = (sₙ*sin((Δt*mag)/2))/mag - (vₙ[1]*Δt*sin((Δt*mag)/2)*jf11c)/(4*(r[1]*conj(r[1]))^(1/2)*mag) - (r[1]*sₙ*sin((Δt*mag)/2)*jf11c)/jf11b + (r[2]*vₙ[3]*sin((Δt*mag)/2)*jf11c)/jf11b - (r[3]*vₙ[2]*sin((Δt*mag)/2)*jf11c)/jf11b + (r[1]*sₙ*Δt*sᵣ*jf11c)/jf11a - (r[2]*vₙ[3]*Δt*sᵣ*jf11c)/jf11a + (r[3]*vₙ[2]*Δt*sᵣ*jf11c)/jf11a
-    jf_6_11 = (vₙ[3]*sin((Δt*mag)/2))/mag - (vₙ[2]*Δt*sin((Δt*mag)/2)*jf11c)/(4*(r[1]*conj(r[1]))^(1/2)*mag) - (r[2]*sₙ*sin((Δt*mag)/2)*jf11c)/jf11b - (r[1]*vₙ[3]*sin((Δt*mag)/2)*jf11c)/jf11b + (r[3]*vₙ[1]*sin((Δt*mag)/2)*jf11c)/jf11b + (r[2]*sₙ*Δt*sᵣ*jf11c)/jf11a + (r[1]*vₙ[3]*Δt*sᵣ*jf11c)/jf11a - (r[3]*vₙ[1]*Δt*sᵣ*jf11c)/jf11a
-    jf_7_11 = (r[1]*vₙ[2]*sin((Δt*mag)/2)*jf11c)/jf11b - (vₙ[3]*Δt*sin((Δt*mag)/2)*jf11c)/(4*(r[1]*conj(r[1]))^(1/2)*mag) - (vₙ[2]*sin((Δt*mag)/2))/mag - (r[2]*vₙ[1]*sin((Δt*mag)/2)*jf11c)/jf11b - (r[3]*sₙ*sin((Δt*mag)/2)*jf11c)/jf11b - (r[1]*vₙ[2]*Δt*sᵣ*jf11c)/jf11a + (r[2]*vₙ[1]*Δt*sᵣ*jf11c)/jf11a + (r[3]*sₙ*Δt*sᵣ*jf11c)/jf11a
-
-    # For Column 12
-    jf12a = (4*(r[2]*conj(r[2]))^(1/2)*mag^2)
-    jf12b = (2*(r[2]*conj(r[2]))^(1/2)*mag^2^(3/2))
-    jf12c = abs(r[2])*(r[2] + conj(r[2]))
-
-    jf_4_12 = (vᵣ[1]*mag*abs(r[2])*conj(vₙ[1])*(r[2] + conj(r[2])))/jf12b - (sₙ*Δt*sin((Δt*mag)/2)*jf12c)/(4*(r[2]*conj(r[2]))^(1/2)*mag) - (sin((Δt*mag)/2)*conj(vₙ[2]))/mag + (vᵣ[2]*mag*abs(r[2])*conj(vₙ[2])*(r[2] + conj(r[2])))/jf12b + (vᵣ[3]*mag*abs(r[2])*conj(vₙ[3])*(r[2] + conj(r[2])))/jf12b - (r[1]*Δt*sᵣ*abs(r[2])*conj(vₙ[1])*(r[2] + conj(r[2])))/jf12a - (r[2]*Δt*sᵣ*abs(r[2])*conj(vₙ[2])*(r[2] + conj(r[2])))/jf12a - (r[3]*Δt*sᵣ*abs(r[2])*conj(vₙ[3])*(r[2] + conj(r[2])))/jf12a
-    jf_5_12 = (r[2]*vₙ[3]*sin((Δt*mag)/2)*jf12c)/jf12b - (vₙ[1]*Δt*sin((Δt*mag)/2)*jf12c)/(4*(r[2]*conj(r[2]))^(1/2)*mag) - (r[1]*sₙ*sin((Δt*mag)/2)*jf12c)/jf12b - (vₙ[3]*sin((Δt*mag)/2))/mag - (r[3]*vₙ[2]*sin((Δt*mag)/2)*jf12c)/jf12b + (r[1]*sₙ*Δt*sᵣ*jf12c)/jf12a - (r[2]*vₙ[3]*Δt*sᵣ*jf12c)/jf12a + (r[3]*vₙ[2]*Δt*sᵣ*jf12c)/jf12a
-    jf_6_12 = (sₙ*sin((Δt*mag)/2))/mag - (vₙ[2]*Δt*sin((Δt*mag)/2)*jf12c)/(4*(r[2]*conj(r[2]))^(1/2)*mag) - (r[2]*sₙ*sin((Δt*mag)/2)*jf12c)/jf12b - (r[1]*vₙ[3]*sin((Δt*mag)/2)*jf12c)/jf12b + (r[3]*vₙ[1]*sin((Δt*mag)/2)*jf12c)/jf12b + (r[2]*sₙ*Δt*sᵣ*jf12c)/jf12a + (r[1]*vₙ[3]*Δt*sᵣ*jf12c)/jf12a - (r[3]*vₙ[1]*Δt*sᵣ*jf12c)/jf12a
-    jf_7_12 = (vₙ[1]*sin((Δt*mag)/2))/mag - (vₙ[3]*Δt*sin((Δt*mag)/2)*jf12c)/(4*(r[2]*conj(r[2]))^(1/2)*mag) + (r[1]*vₙ[2]*sin((Δt*mag)/2)*jf12c)/jf12b - (r[2]*vₙ[1]*sin((Δt*mag)/2)*jf12c)/jf12b - (r[3]*sₙ*sin((Δt*mag)/2)*jf12c)/jf12b - (r[1]*vₙ[2]*Δt*sᵣ*jf12c)/jf12a + (r[2]*vₙ[1]*Δt*sᵣ*jf12c)/jf12a + (r[3]*sₙ*Δt*sᵣ*jf12c)/jf12a
-
-    # For Column 13
-    jf13a = (4*(r[3]*conj(r[3]))^(1/2)*mag^2)
-    jf13b = (2*(r[3]*conj(r[3]))^(1/2)*mag^2^(3/2))
-    jf13c = abs(r[3])*(r[3] + conj(r[3]))
-
-    jf_4_13 = (vᵣ[1]*mag*abs(r[3])*conj(vₙ[1])*(r[3] + conj(r[3])))/jf13b - (sₙ*Δt*sin((Δt*mag)/2)*jf13c)/(4*(r[3]*conj(r[3]))^(1/2)*mag) - (sin((Δt*mag)/2)*conj(vₙ[3]))/mag + (vᵣ[2]*mag*abs(r[3])*conj(vₙ[2])*(r[3] + conj(r[3])))/jf13b + (vᵣ[3]*mag*abs(r[3])*conj(vₙ[3])*(r[3] + conj(r[3])))/jf13b - (r[1]*Δt*sᵣ*abs(r[3])*conj(vₙ[1])*(r[3] + conj(r[3])))/jf13a - (r[2]*Δt*sᵣ*abs(r[3])*conj(vₙ[2])*(r[3] + conj(r[3])))/jf13a - (r[3]*Δt*sᵣ*abs(r[3])*conj(vₙ[3])*(r[3] + conj(r[3])))/jf13a
-    jf_5_13 = (vₙ[2]*sin((Δt*mag)/2))/mag - (vₙ[1]*Δt*sin((Δt*mag)/2)*jf13c)/(4*(r[3]*conj(r[3]))^(1/2)*mag) - (r[1]*sₙ*sin((Δt*mag)/2)*jf13c)/jf13b + (r[2]*vₙ[3]*sin((Δt*mag)/2)*jf13c)/jf13b - (r[3]*vₙ[2]*sin((Δt*mag)/2)*jf13c)/jf13b + (r[1]*sₙ*Δt*sᵣ*jf13c)/jf13a - (r[2]*vₙ[3]*Δt*sᵣ*jf13c)/jf13a + (r[3]*vₙ[2]*Δt*sᵣ*jf13c)/jf13a
-    jf_6_13 = (r[3]*vₙ[1]*sin((Δt*mag)/2)*jf13c)/jf13b - (vₙ[2]*Δt*sin((Δt*mag)/2)*jf13c)/(4*(r[3]*conj(r[3]))^(1/2)*mag) - (r[2]*sₙ*sin((Δt*mag)/2)*jf13c)/jf13b - (r[1]*vₙ[3]*sin((Δt*mag)/2)*jf13c)/jf13b - (vₙ[1]*sin((Δt*mag)/2))/mag + (r[2]*sₙ*Δt*sᵣ*jf13c)/jf13a + (r[1]*vₙ[3]*Δt*sᵣ*jf13c)/jf13a - (r[3]*vₙ[1]*Δt*sᵣ*jf13c)/jf13a
-    jf_7_13 = (sₙ*sin((Δt*mag)/2))/mag - (vₙ[3]*Δt*sin((Δt*mag)/2)*jf13c)/(4*(r[3]*conj(r[3]))^(1/2)*mag) + (r[1]*vₙ[2]*sin((Δt*mag)/2)*jf13c)/jf13b - (r[2]*vₙ[1]*sin((Δt*mag)/2)*jf13c)/jf13b - (r[3]*sₙ*sin((Δt*mag)/2)*jf13c)/jf13b - (r[1]*vₙ[2]*Δt*sᵣ*jf13c)/jf13a + (r[2]*vₙ[1]*Δt*sᵣ*jf13c)/jf13a + (r[3]*sₙ*Δt*sᵣ*jf13c)/jf13a
-
-
-    [1. 0. 0.   0.      0.      0.      0.      Δt 0. 0. 0.         0.          0.;
-     0. 1. 0.   0.      0.      0.      0.      0. Δt 0. 0.         0.          0.;
-     0. 0. 1.   0.      0.      0.      0.      0. 0. Δt 0.         0.          0.;
-     0. 0. 0.   sᵣ      -vᵣ[1]  -vᵣ[2]  -vᵣ[3]  0. 0. 0. jf_4_11    jf_4_12     jf_4_13;
-     0. 0. 0.   vᵣ[1]   sᵣ      vᵣ[3]   -vᵣ[2]  0. 0. 0. jf_5_11    jf_5_12     jf_5_13;
-     0. 0. 0.   vᵣ[2]   -vᵣ[3]  sᵣ      vᵣ[1]   0. 0. 0. jf_6_11    jf_6_12     jf_6_13;
-     0. 0. 0.   vᵣ[3]   vᵣ[2]   -vᵣ[1]  sᵣ      0. 0. 0. jf_7_11    jf_7_12     jf_7_13;
-     0. 0. 0.   0.      0.      0.      0.      1. 0. 0. 0.         0.          0.;
-     0. 0. 0.   0.      0.      0.      0.      0. 1. 0. 0.         0.          0.;
-     0. 0. 0.   0.      0.      0.      0.      0. 0. 1. 0.         0.          0.;
-     0. 0. 0.   0.      0.      0.      0.      0. 0. 0. 1.         0.          0.;
-     0. 0. 0.   0.      0.      0.      0.      0. 0. 0. 0.         1.          0.;
-     0. 0. 0.   0.      0.      0.      0.      0. 0. 0. 0.         0.          1.]
-
+    J[1:3, 1:3] = I(3)
+    J[1:3, 4] = Δt * J_R_q1*velocity
+    J[1:3, 5] = Δt * J_R_q2*velocity
+    J[1:3, 6] = Δt * J_R_q3*velocity
+    J[1:3, 7] = Δt * J_R_q4*velocity
+    J[1:3, 8:10] = Δt * R
+    J[4, 4] = sᵣ
+    J[4, 5:7] = -vᵣ'
+    J[5:7, 4] = vᵣ
+    J[5:7, 5:7] = [sᵣ vᵣ[3] -vᵣ[2];
+                   -vᵣ[3] sᵣ vᵣ[1];
+                   vᵣ[2] -vᵣ[1] sᵣ]
+ 
+    Jsv_srvr = [sₙ -vₙ'
+                vₙ [sₙ -vₙ[3] vₙ[2];
+                    vₙ[3] sₙ -vₙ[1];
+                    -vₙ[2] vₙ[1] sₙ]]
+    Jsrvr_mag = [-sin(mag*Δt / 2.0) * Δt / 2; sin(mag*Δt/2.0) * (-r / mag^2) + cos(mag*Δt/2)*Δt/2 * r/mag]
+    Jsrvr_r = [zeros(1,3); sin(mag*Δt / 2) / mag * I(3)]
+    Jmag_r = 1/mag * r'
+    J[4:7, 11:13] = Jsv_srvr * (Jsrvr_mag*Jmag_r + Jsrvr_r)
+    J[8:10, 8:10] = I(3)
+    J[11:13, 11:13] = I(3)
+    J
+ 
 end
 
 
 
-"""
-Jacobian of f with respect to u, evaluated at x,u,Δ.
-"""
-# function jac_fu(x, u, Δ)
-#     [0 0;
-#      0 0;
-#      Δ 0;
-#      0 Δ]
-# end
+
 
 """
 Non-standard measurement model. Can we extract state estimate from just this?
 """
 # x is position, quaternion, velocity, angular vel
-function h_gps(x)
+# function h_gps(x)
     
-    T = get_gps_transform()
-    gps_loc_body = T*[zeros(3); 1.0]
-
-
-    xyz_body = x[1:3]
-    q_body = x[4:7]
-    
-
-    Tbody = get_body_transform(q_body, xyz_body)
-    xyz_gps = Tbody * [gps_loc_body; 1]
-    meas = xyz_gps[1:2] 
-    gps_meas = GPSMeasurement(t, meas)
-
-    return meas
-end
+#     T = get_gps_transform()
+#     gps_loc_body = T*[zeros(3); 1.0]
+#     xyz_body = x[1:3] # position
+#     q_body = x[4:7] # quaternion
+#     Tbody = get_body_transform(q_body, xyz_body)
+#     xyz_gps = Tbody * [gps_loc_body; 1]
+#     yaw = extract_yaw_from_quaternion(q_body)
+#     meas = [xyz_gps[1:2]; yaw]
+# end
 
 function h_imu(x)
     velocity = x[8: 10]
-    angular_vel = [11:13]
-    # Do Imu now
+    angular_vel = x[11:13]
     T_body_imu = get_imu_transform()
     T_imu_body = invert_transform(T_body_imu)
     R_imu = T_imu_body[1:3,1:3]
     p_imu = T_imu_body[1:3,end]
-
     w_imu = R_imu * angular_vel
     v_imu = R_imu * velocity + p_imu × w_imu
 
 
-    return [v_imu, w_imu]
+    return [v_imu; w_imu]
 end
 
 """
 Jacobian of h with respect to x, evaluated at x.
 """
-function jac_h_gps(x)
-    [1.0 0.0 0.0    (26*x[6])/5-6*x[4]-2*x[7]       2*x[6]-6*x[5]+(26*x[7])/5       (26*x[4])/5+2*x[5]+6*x[6]       (26*x[5])/5-2*x[4]+6*x[7]       0.0     0.0     0.0     0.0     0.0     0.0;
-     0.0 1.0 0.0    2*x[4]-(26*x[5])/5-6*x[7]       -(26*x[4])/5-2*x[5]-6*x[6]      2*x[6]-6*x[5]+(26*x[7])/5       (26*x[6])/5-6*x[4]-2*x[7]       0.0     0.0     0.0     0.0     0.0     0.0;]
+function jac_h_gps(x) # 3 * 13
+
+
+    T = get_gps_transform()
+    gps_loc_body = T*[zeros(3); 1.0]
+    xyz_body = x[1:3] # position
+    q_body = x[4:7] # quaternion
+    Tbody = get_body_transform(q_body, xyz_body)
+    xyz_gps = Tbody * [gps_loc_body; 1]
+    yaw = extract_yaw_from_quaternion(q_body)
+    J = zeros(3, 13)
+    (J_Tbody_xyz, J_Tbody_q) = J_Tbody(x)
+    for i = 1:3
+        J[1:2,i] = (J_Tbody_xyz[i]*[gps_loc_body; 1])[1:2]
+    end
+    for i = 1:4
+	J[1:2,3+i] = (J_Tbody_q[i]*[gps_loc_body; 1])[1:2]
+    end
+    w = q_body[1]
+    x = q_body[2]
+    y = q_body[3]
+    z = q_body[4]
+    J[3,4] = -(2 * z * (-1 + 2 * (y^2 + z^2)))/(4 * (x * y + w * z)^2 + (1 - 2 * (y^2 + z^2))^2)
+    J[3,5] = -(2 * y * (-1 + 2 * (y^2 + z^2)))/(4 * (x * y + w * z)^2 + (1 - 2 * (y^2 + z^2))^2)
+    J[3,6] = (2 * (x + 2 * x * y^2 + 4 * w * y * z - 2 * x * z^2))/(1 + 4 * y^4 + 8 * w * x * y * z + 4 * (-1 + w^2) * z^2 + 4 * z^4 + 4 * y^2 * (-1 + x^2 + 2 * z^2))
+    J[3,7] = (2 * (w - 2 * w * y^2 + 4 * x * y * z + 2 * w * z^2))/(1 + 4 * y^4 + 8 * w * x * y * z + 4 * (-1 + w^2) * z^2 + 4 * z^4 + 4 * y^2 * (-1 + x^2 + 2 * z^2))
+    J
 end
 
 
@@ -233,62 +276,72 @@ d = h(μ̂) - Cμ̂
 The extended Kalman filter update equations can be implemented as the following:
 
 Σₖ = (Σ̂⁻¹ + C' (meas_var)⁻¹ C)⁻¹
-μₖ = Σₖ ( Σ̂⁻¹ μ̂ + C' (meas_var)⁻¹ (zₖ - d) )
+μₖ = Σₖ ( Σ̂⁻¹ μ̂ + C' (meas_var)⁻¹ (zₖ - d) )  | z is 6 by 1
 
 """
-function filter(meas; Δ,  μK , Σk, localization_state_channel)
-    meas_var = Diagonal([1,1,0.05,0.1,0.1,0.1,0.1,0.05,0.05,0.05,0.05,0.05,0.05]) 
-    proc_cov = Diagonal([0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+function filter(meas, Δ,  μ , Σ, localization_state_channel)
+  #  @info " f1"
+    meas_var = Diagonal([1 ;1; 0.05;0.1;0.1;0.1;0.1;0.05;0.05;0.05;0.05;0.05;0.05]) 
+    meas_var_gps = Diagonal([0.05,0.05, 0.05])
+    meas_var_imu = Diagonal([0.05,0.05,0.05,0.05,0.05,0.05]) 
 
-    x_prev = μK[μK.length]
-
-    Σ_prev = Σk[Σk.length]
-
+    proc_cov = Diagonal([0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+    x_prev = μ
+    Σ_prev = Σ
     xₖ = f(x_prev[1:3], x_prev[4:7], x_prev[8:10], x_prev[11:13], Δ) #Current x
-
-
     z = meas
+    A = jac_fx(xₖ, Δ)  
+    μ̂ = f(x_prev[1:3], x_prev[4:7], x_prev[8:10], x_prev[11:13],  Δ)
 
-    A = jac_fx(xₖ, Δ)
-    
-    μ̂ = f(x_prev,  Δ)
-
-    Σ̂ = A*Σ_prev*A' + proc_cov
+  #  @info "f2"
+    Σ̂ = A * Σ_prev * A' + proc_cov
 
     if meas isa GPSMeasurement
+        @info " GPS"
+        tmp_z = []
+        
+        push!(tmp_z, z.lat)
+        push!(tmp_z, z.long)
+        push!(tmp_z, z.heading)
         C = jac_h_gps(μ̂) # gps version
         d = h_gps(μ̂) - C*μ̂ # gps version
-        Σ = inv(inv(Σ̂) + C'*inv(meas_var)*C)
-        μ = Σ * (inv(Σ̂) * μ̂ + C'*inv(meas_var) * (z - d))
-
-        full_state = FullVehicleState{position : μ[1:3], velocity: μ[8:10], ang_vel:[11:13], orientation:[4:7]}
-
-        local_state = MyLocalizationType{last_update: meas.time, x : full_state}
+        Σ = inv(inv(Σ̂) + C'*inv(meas_var_gps)*C)
+        μ = Σ * (inv(Σ̂) * μ̂ + C' * inv(meas_var_gps) * (tmp_z - d))
+        full_state = FullVehicleState(μ[1:3], μ[8:10], μ[11:13], μ[4:7])
+        local_state = MyLocalizationType( meas.time, full_state)
+        if isready(localization_state_channel)
+            take!(localization_state_channel)
+        end
+        @info "$(local_state)"
         put!(localization_state_channel, local_state)
+      #  @info "finished"
     else
+        @info " IMU"
+        tmp_z = []
+        push!(tmp_z, z.linear_vel[1])
+        push!(tmp_z, z.linear_vel[2])
+        push!(tmp_z, z.linear_vel[3])
+        push!(tmp_z, z.angular_vel[1])
+        push!(tmp_z, z.angular_vel[2])
+        push!(tmp_z, z.angular_vel[3])
+
+     #   @info " imu 1"
         C = jac_h_imu(μ̂) # imu version
+       # @info " imu 4"
         d = h_imu(μ̂) - C*μ̂ # imu version
-        Σ = inv(inv(Σ̂) + C'*inv(meas_var)*C)
-        μ = Σ * (inv(Σ̂) * μ̂ + C'*inv(meas_var) * (z - d))
-        
-        full_state = FullVehicleState{position : μ[1:3], velocity: μ[8:10], ang_vel:[11:13], orientation:[4:7]}
+      #  @info " imu 2"
+        Σ = inv(inv(Σ̂) + C'*inv(meas_var_imu)*C)
+        μ = Σ * (inv(Σ̂) * μ̂ + C'* (meas_var_imu) * (tmp_z - d))
+      #  @info " imu 3"
+        full_state = FullVehicleState(μ[1:3],μ[8:10], μ[11:13], μ[4:7])
 
-        local_state = MyLocalizationType{last_update: meas.time, x : full_state}
+        local_state = MyLocalizationType(meas.time, full_state)
+        if isready(localization_state_channel)
+            take!(localization_state_channel)
+        end
 
+        @info "$(local_state)"
         put!(localization_state_channel, local_state)
     end
 
-
-end
-
-struct FullVehicleState 
-    position::SVector{3, Float64}
-    velocity::SVector{3, Float64}
-    ang_vel::SVector{3, Float64}
-    orientation::SVector{3, Float64}
-end
-
-struct MyLocalizationType
-    last_update:: Float64
-    x::FullVehicleState
 end

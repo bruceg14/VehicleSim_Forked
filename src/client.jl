@@ -44,6 +44,7 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
     steering_angle = 0.0
     controlled = true
     @info "Press 'q' at any time to terminate vehicle."
+    @async my_client(host, port, socket)
     while controlled && isopen(socket)
         key = get_c()
         if key == 'q'
